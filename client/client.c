@@ -126,7 +126,7 @@ status _op_get_file(int sockfd, frame* res) {
                 /* infof("received 'file info' frame"); */
 
                 s = buf_to_fileio(&rfio, (res->body).buffers, (res->body).len);
-                infof("file_info: name(%s) size(%u)", rfio.name, rfio.size);
+                infof("file_info: name( %s ) size(%u bytes)", rfio.name, rfio.size);
 
                 if (s != STATUS_OK) {
                     next = 0;
@@ -193,7 +193,7 @@ status _op_get_file(int sockfd, frame* res) {
     }
 
     if (s == STATUS_OK) {
-        infof("Download done -> your file: %s (%u bytes)", wfio.name, wfio.size);
+        infof("Download done -> your file: %s (%u bytes)", wfio.name, rfio.size);
     }
 
     fileio_close(&rfio);
