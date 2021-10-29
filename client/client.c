@@ -13,6 +13,7 @@
 #include <unistd.h>
 
 #include "../shared/clog.h"
+#include "../shared/fileio.h"
 #include "../shared/frame.h"
 
 #define SERVER_PORT 29010
@@ -45,7 +46,7 @@ int connect_server(struct sockaddr_in* serv_sockaddr) {
     return conn_sockfd;
 }
 
-status req_op_hello(frame* res) {
+status req_op_hello(frame* req) {
     status s = STATUS_OK;
 
     infof("request 'HELLO' frame");
@@ -55,12 +56,26 @@ status req_op_hello(frame* res) {
     }
 
     char msg[] = "HELLO SERVER\r\n";
-    s = new_base_frame(res, OP_HELLO, FL_REQUEST, msg, strlen(msg));
+    s = new_base_frame(req, OP_HELLO, FL_REQUEST, msg, strlen(msg));
 
     return s;
 }
 
-status req_op_quit(frame* res) {
+status req_op_get_file(frame* req, char* filename) {
+    status s = STATUS_OK;
+
+    infof("request 'GET_FILE' frame");
+
+    if (s != STATUS_OK) {
+        return s;
+    }
+
+    s = new_base_frame(req, OP_GET_FILE, FL_REQUEST, filename, strlen(filename));
+
+    return s;
+}
+
+status req_op_quit(frame* req) {
     status s = STATUS_OK;
 
     infof("request 'QUIT' frame");
@@ -70,7 +85,7 @@ status req_op_quit(frame* res) {
     }
 
     char msg[] = "QUIT SERVER\r\n";
-    s = new_base_frame(res, OP_QUIT, FL_REQUEST, msg, strlen(msg));
+    s = new_base_frame(req, OP_QUIT, FL_REQUEST, msg, strlen(msg));
 
     return s;
 }
@@ -79,6 +94,104 @@ status _op_hello(int sockfd, frame* res) {
     status s = STATUS_OK;
 
     infof("received 'HELLO' frame");
+
+    return s;
+}
+
+status _op_get_file(int sockfd, frame* res) {
+    status s = STATUS_OK;
+
+    infof("received 'HELLO' frame");
+    uint8_t next = 1;
+
+    file_io rfio = {};
+    file_io wfio = {};
+
+    uint32_t n_bytes = 0;
+
+    frame_body* res_body = &(res->body);
+
+    while (next) {
+        switch (res->flag) {
+            case FL_ERROR:
+                return STATUS_ERR;
+            case FL_GF_NOTFOUND:
+                return s;
+            case FL_GF_INFO:
+                infof("received 'file info' frame");
+
+                s = buf_to_fileio(&rfio, (res->body).buffers, (res->body).len);
+
+                if (s != STATUS_OK) {
+                    next = 0;
+                    break;
+                }
+
+                sprintf(wfio.name, "down_%s", rfio.name);
+                s = fileio_new(&wfio, wfio.name, strlen(wfio.name));
+                s = fileio_open(&wfio, "wb");
+
+                if (s != STATUS_OK) {
+                    next = 0;
+                    break;
+                }
+
+                s = rstream_start(sockfd, res);
+
+                if (s != STATUS_OK) {
+                    next = 0;
+                    break;
+                }
+
+            case FL_GF_DATA:
+                /* infof("received 'data file' frame"); */
+
+                if (rfio.size < 0) {
+                    next = 0;
+                    s = STATUS_ERR;
+                    errorf("file_size < 0");
+                    break;
+                }
+
+                if (rfio.size == 0) {
+                    next = 0;
+                    break;
+                }
+
+                s = rstream_read(sockfd, res, 0, &n_bytes, &next);
+
+                /* debugf("rs_read: %u", n_bytes); */
+
+                if (s != STATUS_OK) {
+                    next = 0;
+                    break;
+                }
+
+                if (n_bytes > 0) {
+                    s = fileio_write(&wfio, res_body->buffers, res_body->cur_len);
+
+                    if (s != STATUS_OK) {
+                        next = 0;
+                        break;
+                    }
+                }
+
+                infof("Downloading %u / %u bytes", res_body->len, rfio.size);
+
+                break;
+            default:
+                next = 0;
+                s = STATUS_ERR;
+                break;
+        }
+    }
+
+    if (s == STATUS_OK) {
+        infof("Download done -> your file: %s", wfio.name);
+    }
+
+    fileio_close(&rfio);
+    fileio_close(&wfio);
 
     return s;
 }
@@ -99,20 +212,26 @@ status _op_invalid(int sockfd, frame* res) {
     return s;
 }
 
-uint16_t input_to_opcode(char* input) {
+void remove_line_feed(char* input) {
     // replace new line with null character '\0'
     char* last_ch = strrchr(input, '\n');
     if (last_ch == NULL) {
-        return OP_INVALID;
+        return;
     }
     *last_ch = '\0';
+}
 
+uint16_t input_to_opcode(char* input) {
     if (strcasecmp(input, "HELLO") == 0) {
         return OP_HELLO;
     }
 
     if (strcasecmp(input, "QUIT") == 0) {
         return OP_QUIT;
+    }
+
+    if (strcasecmp(input, "GET_FILE") == 0) {
+        return OP_GET_FILE;
     }
 
     return OP_INVALID;
@@ -126,13 +245,15 @@ status make_request(int sockfd, frame* req) {
     uint8_t input_ok = 1;
 
     do {
-        printf("Opcode: ");
+        printf("Opcode (hello) - (get_file) - (quit): ");
         // read line from stdin (screen)
         if (fgets(buffers, BUFFER_SIZE, stdin) == NULL) {
             errorf("Cannot read from stdin");
 
             return STATUS_ERR;
         }
+
+        remove_line_feed(buffers);
 
         input_ok = 1;
 
@@ -142,9 +263,17 @@ status make_request(int sockfd, frame* req) {
             case OP_HELLO:
                 s = req_op_hello(req);
                 break;
-            /* case OP_GET_FILE: */
-            /*     s = _op_hello(req, res); */
-            /*     break; */
+            case OP_GET_FILE:
+                printf("file_name: ");
+                if (fgets(buffers, BUFFER_SIZE, stdin) == NULL) {
+                    errorf("Cannot read from stdin");
+
+                    return STATUS_ERR;
+                }
+                remove_line_feed(buffers);
+
+                s = req_op_get_file(req, buffers);
+                break;
             case OP_QUIT:
                 s = req_op_quit(req);
                 break;
@@ -170,9 +299,9 @@ status handle_frame(int sockfd, frame* res) {
         case OP_HELLO:
             s = _op_hello(sockfd, res);
             break;
-        /* case OP_GET_FILE: */
-        /*     s = _op_hello(req, res); */
-        /*     break; */
+        case OP_GET_FILE:
+            s = _op_get_file(sockfd, res);
+            break;
         case OP_QUIT:
             s = _op_quit(sockfd, res);
             break;

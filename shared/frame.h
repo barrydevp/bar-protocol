@@ -70,9 +70,13 @@ enum {
 
 // GET_FILE OP FLAG
 enum {
-    FL_GF_IN_TRANSIT = 3,
+    FL_GF_INFO = 3,
 
-    FL_GF_END = 4,
+    FL_GF_NOTFOUND = 4,
+
+    FL_GF_DATA = 5,
+
+    FL_GF_END = 6,
 };
 
 typedef char buf;
@@ -167,7 +171,7 @@ uint32_t get_frame_exts_hdr_size(frame* _frame);
 status calc_frame_size(frame* _frame, uint32_t body_size);
 status put_body_frame(frame* _frame, buf* buffers, uint32_t buf_size);
 status empty_frame(frame* _frame);
-status new_empty_frame(frame* _frame, uint16_t _op, uint8_t _flag, uint32_t body_size);
+status new_empty_body_frame(frame* _frame, uint16_t _op, uint8_t _flag, uint32_t body_size);
 status new_base_frame(frame* _frame, uint16_t _op, uint8_t _flag, buf* data, uint32_t data_size);
 void print_frame(frame* _frame);
 

@@ -13,10 +13,12 @@
 #include <unistd.h>
 
 #include "../shared/clog.h"
+#include "../shared/fileio.h"
 #include "../shared/frame.h"
 
 #define DEFAULT_PORT 29010
 #define DEFAULT_ADDR "127.0.0.1"
+#define MAX_BUFFER 1024
 
 int pexit(const char* str) {
     perror(str);
@@ -60,6 +62,115 @@ status _op_hello(int sockfd, frame* req, frame* res) {
     }
 
     write_frame(sockfd, res);
+
+    return s;
+}
+
+status _op_get_file(int sockfd, frame* req, frame* res) {
+    status s = STATUS_OK;
+
+    infof("received 'GET_FILE' frame");
+
+    file_io _fio = {};
+
+    s = fileio_new(&_fio, (req->body).buffers, (req->body).len);
+    /* s = buf_to_fileio(&_fio, (req->body).buffers, (req->body).len); */
+
+    if (s != STATUS_OK) {
+        return s;
+    }
+
+    s = fileio_open(&_fio, "rb");
+    if (s != STATUS_OK) {
+        infof("send 'FILE NOT FOUND' frame");
+        char msg[] = "FILE NOT FOUND\r\n";
+        s = new_base_frame(res, OP_GET_FILE, FL_GF_NOTFOUND, msg, strlen(msg));
+
+        write_frame(sockfd, res);
+
+        s = fileio_close(&_fio);
+
+        return s;
+    }
+
+    // send file info
+    buf buffers[259];
+    uint32_t buf_size = 0;
+
+    s = fileio_to_buf(&_fio, buffers, &buf_size);
+
+    if (s != STATUS_OK) {
+        fileio_close(&_fio);
+        return s;
+    }
+
+    s = new_base_frame(res, OP_GET_FILE, FL_GF_INFO, buffers, buf_size);
+
+    if (s != STATUS_OK) {
+        fileio_close(&_fio);
+        return s;
+    }
+
+    /* debugf("send info"); */
+    infof("send 'FILE INFO' frame");
+    s = write_frame(sockfd, res);
+
+    if (s != STATUS_OK) {
+        fileio_close(&_fio);
+        return s;
+    }
+
+    // send file data
+
+    infof("start send 'FILE DATA' frame");
+    s = new_empty_body_frame(res, OP_GET_FILE, FL_GF_DATA, _fio.size);
+
+    if (s != STATUS_OK) {
+        fileio_close(&_fio);
+        return s;
+    }
+
+    /* debugf("start send data"); */
+    s = wstream_start(sockfd, res);
+    /* debugf("done start"); */
+
+    if (s != STATUS_OK) {
+        fileio_close(&_fio);
+        return s;
+    }
+
+    uint8_t next = 1;
+
+    frame_body* res_body = &(res->body);
+
+    while (next) {
+        s = fileio_read(&_fio, res_body->buffers, res_body->buffer_size, &(res_body->cur_len), &next);
+
+        if (s != STATUS_OK) {
+            fileio_close(&_fio);
+            return s;
+        }
+
+        uint8_t stream_next = 1;
+
+        /* debugf("write call %d, %d, %d", res_body->cur_len, res_body->len, res->size); */
+        s = wstream_write(sockfd, res, NULL, 0, &stream_next);
+        /* debugf("write called"); */
+        if (s != STATUS_OK) {
+            fileio_close(&_fio);
+            return s;
+        }
+
+        /* next = 0; */
+        if (stream_next != next || s != STATUS_OK) {
+            fileio_close(&_fio);
+            return STATUS_ERR;
+        }
+    }
+
+    /* debugf("end send data"); */
+    wstream_end(sockfd, res);
+    fileio_close(&_fio);
 
     return s;
 }
@@ -111,9 +222,9 @@ status handle_frame(int sockfd, frame* req, frame* res) {
         case OP_HELLO:
             s = _op_hello(sockfd, req, res);
             break;
-        /* case OP_GET_FILE: */
-        /*     s = _op_hello(req, res); */
-        /*     break; */
+        case OP_GET_FILE:
+            s = _op_get_file(sockfd, req, res);
+            break;
         case OP_QUIT:
             s = _op_quit(sockfd, req, res);
             break;

@@ -164,9 +164,10 @@ void _encode_frame_header(frame* _frame, buf* buffers) {
     for (uint8_t i = 0; i < _frame->off - 2; i++) {
         ext _ext = *(_frame->exts + i);
 
-        for (uint8_t j = 0; j < EXTENSION_SIZE; j++) {
-            *(buffers + i * EXTENSION_SIZE + j + BASE_HEADER_SIZE) = *(_ext + j);
-        }
+        /* for (uint8_t j = 0; j < EXTENSION_SIZE; j++) { */
+        /*     *(buffers + i * EXTENSION_SIZE + j + BASE_HEADER_SIZE) = *(_ext + j); */
+        /* } */
+        memcpy(buffers + i * EXTENSION_SIZE, _ext, EXTENSION_SIZE);
     }
 }
 
@@ -197,12 +198,13 @@ status put_frame_body(frame* _frame, buf* buffers, uint32_t buf_size) {
 
     frame_body* _body = &(_frame->body);
 
-    for (uint32_t i = 0; i < buf_size; ++i) {
-        *(_body->buffers + i + _body->cur_len) = *(buffers + i);
-    }
+    /* for (uint32_t i = 0; i < buf_size; ++i) { */
+    /*     *(_body->buffers + i + _body->cur_len) = *(buffers + i); */
+    /* } */
 
+    memcpy(_body->buffers + _body->cur_len, buffers, buf_size);
     /* _body->len += buf_size; */
-    _body->cur_len = buf_size;
+    _body->cur_len += buf_size;
 
     return s;
 }
@@ -227,6 +229,28 @@ status empty_frame(frame* _frame) {
     _frame->op = 0;
     _frame->off = 2;
     _frame->flag = 0;
+
+    return s;
+}
+
+status new_empty_body_frame(frame* _frame, uint16_t _op, uint8_t _flag, uint32_t data_size) {
+    status s = STATUS_OK;
+
+    s = empty_frame(_frame);
+
+    if (s != STATUS_OK) {
+        return s;
+    }
+
+    _frame->op = _op;
+    _frame->off = 2;
+    _frame->flag = _flag;
+
+    s = calc_frame_size(_frame, data_size);
+
+    if (s != STATUS_OK) {
+        return s;
+    }
 
     return s;
 }
@@ -269,6 +293,7 @@ void print_frame(frame* _frame) {
         infof("# body(len,cur_len,buf_size)=(%u,%u,%u): %s", (_frame->body).len, (_frame->body).cur_len,
               (_frame->body).buffer_size, _frame->body.buffers);
     }
+    infof("#-------------#");
 }
 
 status free_inner_frame(frame* _frame) {
@@ -364,9 +389,11 @@ status parse_e_frame_hdr(frame* _frame, buf* buffers, uint32_t buf_size) {
     for (uint8_t i = 0; i < _frame->off - 2; i++) {
         ext _ext = *(_frame->exts + i);
 
-        for (uint8_t j = 0; j < EXTENSION_SIZE; j++) {
-            *(_ext + j) = *(buffers + i * EXTENSION_SIZE + j);
-        }
+        /* for (uint8_t j = 0; j < EXTENSION_SIZE; j++) { */
+        /*     *(_ext + j) = *(buffers + i * EXTENSION_SIZE + j); */
+        /* } */
+
+        memcpy(_ext, buffers + i * EXTENSION_SIZE, EXTENSION_SIZE);
     }
 
     return s;
@@ -429,10 +456,11 @@ status read_frame_body(int sockfd, frame* _frame, uint32_t data_size, uint32_t* 
     // if data_size = 0, we will call one read to read data left in frame
     // we need this behavior to speed up read stream, because we don't want read will block until read all data
     uint32_t body_need_read = data_size > 0 && data_size < body_size_left ? data_size : body_size_left;
-    debugf("body_size_left: %u", body_size_left);
-    debugf("body_need_read: %u", body_need_read);
+    /* debugf("body_size_left: %u", body_size_left); */
+    /* debugf("body_need_read: %u", body_need_read); */
 
     if (body_need_read == 0) {
+        *readed_size = 0;
         return s;
     }
 
@@ -506,6 +534,9 @@ status rstream_read(int sockfd, frame* _frame, uint32_t data_size, uint32_t* rea
     }
 
     if (get_frame_body_size(_frame) == 0) {
+        *readed_size = 0;
+        *next = 0;
+
         return s;
     }
 
@@ -515,7 +546,7 @@ status rstream_read(int sockfd, frame* _frame, uint32_t data_size, uint32_t* rea
         return s;
     }
 
-    *next = _is_frame_end(_frame);
+    *next = !_is_frame_end(_frame);
 
     return s;
 }
@@ -530,7 +561,7 @@ status rstream_end(int sockfd, frame* _frame) {
     }
 
     frame_body* _body = &(_frame->body);
-    debugf("body->len: %u", _body->len);
+    /* debugf("body->len: %u", _body->len); */
 
     // if frame is not read all data -> we need read all data left in frame
     if (_body->len < get_frame_body_size(_frame)) {
@@ -608,12 +639,14 @@ status write_frame_body(int sockfd, frame* _frame) {
 
     frame_body* _body = &(_frame->body);
 
-    if ((_body->len + _body->cur_len) > _frame->size) {
+    if ((_body->len + _body->cur_len) > get_frame_body_size(_frame)) {
         errorf("frame body is larger than frame size.");
         return STATUS_ERR;
     }
 
     uint32_t n_bytes = 0;
+
+    /* debugf("need write %u", _body->cur_len); */
 
     while (n_bytes < _body->cur_len) {
         int _n_bytes = write(sockfd, _body->buffers + n_bytes, _body->cur_len - n_bytes);
@@ -667,13 +700,19 @@ status wstream_write(int sockfd, frame* _frame, buf* data, uint32_t data_size, u
         }
     }
 
+    /*     if ((_frame->body).cur_len == 0) { */
+    /*         errorf("0 size"); */
+    /*  */
+    /*         return  */
+    /*     } */
+
     s = write_frame_body(sockfd, _frame);
 
     if (s != STATUS_OK) {
         return s;
     }
 
-    *next = _is_frame_end(_frame);
+    *next = !_is_frame_end(_frame);
 
     return s;
 }
