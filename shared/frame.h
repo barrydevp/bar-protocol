@@ -36,7 +36,8 @@
 #define MAX_HEADER_SIZE 1024
 #define EXTENSION_SIZE 4  // 1 extension entry = 4 bytes
 #define OFF_RATE 4        // 1 offset = 4 bytes
-#define DEFAULT_BODY_BUF_SIZE 1024
+#define DEFAULT_BODY_BUF_SIZE 65536 
+#define STREAM_BUFF_SIZE 65536 // 64kb
 #define MAX_FRAME_SIZE 0xffffffff
 
 // state statuses

@@ -455,7 +455,10 @@ status read_frame_body(int sockfd, frame* _frame, uint32_t data_size, uint32_t* 
     uint32_t body_size_left = get_frame_body_size(_frame) - _body->len;
     // if data_size = 0, we will call one read to read data left in frame
     // we need this behavior to speed up read stream, because we don't want read will block until read all data
-    uint32_t body_need_read = data_size > 0 && data_size < body_size_left ? data_size : body_size_left;
+    uint32_t body_need_read = data_size < body_size_left ? data_size : body_size_left;
+    if (data_size == 0) {
+        body_need_read = body_size_left > DEFAULT_BODY_BUF_SIZE ? DEFAULT_BODY_BUF_SIZE : body_size_left;
+    }
     /* debugf("body_size_left: %u", body_size_left); */
     /* debugf("body_need_read: %u", body_need_read); */
 
@@ -598,9 +601,13 @@ status read_frame(int sockfd, frame* _frame) {
         return s;
     }
 
-    print_frame(_frame);
+    /* print_frame(_frame); */
 
     s = rstream_end(sockfd, _frame);
+
+    frame_body *_body = &(_frame->body);
+
+    *(_body->buffers + _body->cur_len) = '\0';
 
     if (s != STATUS_OK) {
         return s;

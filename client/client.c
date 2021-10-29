@@ -49,13 +49,13 @@ int connect_server(struct sockaddr_in* serv_sockaddr) {
 status req_op_hello(frame* req) {
     status s = STATUS_OK;
 
-    infof("request 'HELLO' frame");
+    /* infof("request 'HELLO' frame"); */
 
     if (s != STATUS_OK) {
         return s;
     }
 
-    char msg[] = "HELLO SERVER\r\n";
+    char msg[] = "HELLO SERVER";
     s = new_base_frame(req, OP_HELLO, FL_REQUEST, msg, strlen(msg));
 
     return s;
@@ -64,7 +64,7 @@ status req_op_hello(frame* req) {
 status req_op_get_file(frame* req, char* filename) {
     status s = STATUS_OK;
 
-    infof("request 'GET_FILE' frame");
+    /* infof("request 'GET_FILE' frame"); */
 
     if (s != STATUS_OK) {
         return s;
@@ -78,13 +78,13 @@ status req_op_get_file(frame* req, char* filename) {
 status req_op_quit(frame* req) {
     status s = STATUS_OK;
 
-    infof("request 'QUIT' frame");
+    /* infof("request 'QUIT' frame"); */
 
     if (s != STATUS_OK) {
         return s;
     }
 
-    char msg[] = "QUIT SERVER\r\n";
+    char msg[] = "QUIT SERVER";
     s = new_base_frame(req, OP_QUIT, FL_REQUEST, msg, strlen(msg));
 
     return s;
@@ -93,7 +93,8 @@ status req_op_quit(frame* req) {
 status _op_hello(int sockfd, frame* res) {
     status s = STATUS_OK;
 
-    infof("received 'HELLO' frame");
+    /* infof("received 'HELLO' frame"); */
+    infof("HELLO: %s", (res->body).buffers);
 
     return s;
 }
@@ -101,7 +102,7 @@ status _op_hello(int sockfd, frame* res) {
 status _op_get_file(int sockfd, frame* res) {
     status s = STATUS_OK;
 
-    infof("received 'HELLO' frame");
+    /* infof("received 'GET_FILE' frame"); */
     uint8_t next = 1;
 
     file_io rfio = {};
@@ -114,13 +115,18 @@ status _op_get_file(int sockfd, frame* res) {
     while (next) {
         switch (res->flag) {
             case FL_ERROR:
+                errorf("GET_FILE error: %s", (res->body).buffers);
+
                 return STATUS_ERR;
             case FL_GF_NOTFOUND:
+                errorf("GET_FILE notfound: %s", (res->body).buffers);
+
                 return s;
             case FL_GF_INFO:
-                infof("received 'file info' frame");
+                /* infof("received 'file info' frame"); */
 
                 s = buf_to_fileio(&rfio, (res->body).buffers, (res->body).len);
+                infof("file_info: name(%s) size(%u)", rfio.name, rfio.size);
 
                 if (s != STATUS_OK) {
                     next = 0;
@@ -176,7 +182,7 @@ status _op_get_file(int sockfd, frame* res) {
                     }
                 }
 
-                infof("Downloading %u / %u bytes", res_body->len, rfio.size);
+                /* infof("Downloading %u / %u bytes", res_body->len, rfio.size); */
 
                 break;
             default:
@@ -187,7 +193,7 @@ status _op_get_file(int sockfd, frame* res) {
     }
 
     if (s == STATUS_OK) {
-        infof("Download done -> your file: %s", wfio.name);
+        infof("Download done -> your file: %s (%u bytes)", wfio.name, wfio.size);
     }
 
     fileio_close(&rfio);
@@ -199,7 +205,9 @@ status _op_get_file(int sockfd, frame* res) {
 status _op_quit(int sockfd, frame* res) {
     status s = STATUS_CLOSE;
 
-    infof("received 'QUIT' frame");
+    /* infof("received 'QUIT' frame"); */
+
+    infof("QUIT: %s", (res->body).buffers);
 
     return s;
 }
@@ -207,7 +215,8 @@ status _op_quit(int sockfd, frame* res) {
 status _op_invalid(int sockfd, frame* res) {
     status s = STATUS_OK;
 
-    infof("received 'INVALID' frame");
+    /* infof("received 'INVALID' frame"); */
+    infof("INVALID: %s", (res->body).buffers);
 
     return s;
 }
@@ -283,7 +292,7 @@ status make_request(int sockfd, frame* req) {
         }
     } while (!input_ok);
 
-    print_frame(req);
+    /* print_frame(req); */
 
     s = write_frame(sockfd, req);
 
@@ -329,7 +338,7 @@ status request_reply(const int conn_sockfd) {
             return s;
         }
 
-        debugf("send frame ok ->");
+        /* debugf("send frame ok ->"); */
 
         s = read_frame(conn_sockfd, &frame_res);
 
@@ -338,13 +347,13 @@ status request_reply(const int conn_sockfd) {
             return s;
         }
 
-        debugf("received frame ok ->");
+        /* debugf("received frame ok ->"); */
 
-        print_frame(&frame_res);
+        /* print_frame(&frame_res); */
 
         s = handle_frame(conn_sockfd, &frame_res);
 
-        debugf("handle frame ok ->");
+        /* debugf("handle frame ok ->"); */
 
         if (s != STATUS_OK) {
             perror("handle_frame()");
