@@ -3,3 +3,7 @@
 
 *.o
 *.out
+
+.DS_Store
+
+down_*
